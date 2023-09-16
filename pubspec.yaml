@@ -36,8 +36,13 @@ dependencies:
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.2
 
-  # Packages added by me
+  # To write less code
   get: ^4.6.6
+
+  # To get geostuff
+  geolocator: ^9.0.0
+
+
 
 dev_dependencies:
   flutter_test:
