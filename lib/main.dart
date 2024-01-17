@@ -103,8 +103,9 @@ class SdSdController extends GetxController {
     if (s != speed.value) {
         log("updating speed to $s");
         speed.value = s;
+
+        _adjustVolumeAccordingToNewSpeed(s);
     }
-    speedHistory.add(s);
   }
 
   void processNewPosition(Position? position) {
@@ -113,7 +114,6 @@ class SdSdController extends GetxController {
           var speedInKmPerHr = _mPerSecondToKmh(speedInMetersPerSec);
 
           _updateSpeed(speedInKmPerHr);
-          _updateInertia();
       }
   }
 
@@ -133,10 +133,6 @@ class SdSdController extends GetxController {
         processNewPosition(position);
     });
     _ticker.start();
-
-    //Geolocator
-    //    .getPositionStream(locationSettings: androidLocationSettings)
-    //    .listen(processNewPosition);
   }
 
   Future<bool> getPermission() async {
@@ -208,6 +204,16 @@ class SdSdController extends GetxController {
         log("updating inertia to $newState");
     }
   }
+
+  void _adjustVolumeAccordingToNewSpeed(int s) async {
+    if (s == 0) {
+        await PerfectVolumeControl.setVolume(SdSdConfig.idleVolume / 100);
+    } else if (s <= SdSdConfig.fullVolumeSpeed) {
+        await PerfectVolumeControl.setVolume(0.5);
+    } else {
+        await PerfectVolumeControl.setVolume(1);
+    }
+  } 
 }
 
 class SdSd extends StatelessWidget {
@@ -224,7 +230,6 @@ class SdSd extends StatelessWidget {
         children: [
           Obx(() => Text("Current Speed: ${c.speed} km/h")),
           Obx(() => Text("Current Volume: ${c.vol}%")),
-          Obx(() => Text("Current State: ${c.curMovementState}")),
         ],
       ),
     );
