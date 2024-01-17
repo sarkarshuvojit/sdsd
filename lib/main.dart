@@ -3,6 +3,7 @@ import 'dart:developer';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:get/get.dart';
+import 'package:perfect_volume_control/perfect_volume_control.dart';
 
 void main() {
   runApp(const MyApp());
@@ -15,7 +16,7 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return GetMaterialApp(
-      title: 'Flutter Demo',
+      title: 'Volume Cruise Control',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
           colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
@@ -27,7 +28,7 @@ class MyApp extends StatelessWidget {
       home: Scaffold(
         backgroundColor: const Color(0xFFecf0f1),
         appBar: AppBar(
-          title: const Text("Slow down, sound down"),
+          title: const Text("Volume Cruise Control"),
         ),
         body: const SdSd(),
       ),
@@ -56,9 +57,10 @@ enum MovementStates { idle, acceleration, deceleration }
 class SdSdController extends GetxController {
   var speed = 0.obs;
   var vol = 0.obs;
-  var curMovementState = MovementStates.idle;
+  var curMovementState = MovementStates.idle.obs;
   var isLocationServiceDisabled = false.obs;
   var isPermissionGranted = false.obs;
+  RxList<int> speedHistory = <int>[].obs;
 
   final LocationSettings locationSettings = const LocationSettings(
     accuracy: LocationAccuracy.high,
@@ -76,6 +78,7 @@ class SdSdController extends GetxController {
   void onInit() {
     super.onInit();
     startPolling();
+    _initVolumeManager();
   }
 
 
@@ -85,6 +88,11 @@ class SdSdController extends GetxController {
 
       // Round the result to the nearest integer using a more precise method
       return (speedInKmh + 0.5).toInt();
+  }
+
+  void _updateSpeed(int s) {
+    speed.value = s;
+    speedHistory.add(s);
   }
 
 
@@ -105,7 +113,8 @@ class SdSdController extends GetxController {
             var speedInKmPerHr = _mPerSecondToKmh(speedInMetersPerSec);
 
             log("Current speed: $speedInKmPerHr km/h");
-            speed.value = speedInKmPerHr;
+            _updateSpeed(speedInKmPerHr);
+            _updateInertia();
           }
         });
   }
@@ -142,20 +151,37 @@ class SdSdController extends GetxController {
       return false;
     }
 
-    // switch (locationPermission) {
-    //   case LocationPermission.always:
-    //   case LocationPermission.whileInUse:
-    //     log("Permission is granted");
-    //     isPermissionGranted.value = true;
-    //     isLocationServiceDisabled.value = false;
-    //     return true;
-    //   case LocationPermission.denied:
-    //     return
-    //   default:
-    //     log("Permission is not granted");
-    //     return false;
-    // }
     return true;
+  }
+
+  int _volumeInPercent(double volume) {
+     return (100 * volume).toInt();
+  }
+  void _initVolumeManager() async {
+    Future.delayed(const Duration(seconds: 1), () async {
+        vol.value = _volumeInPercent(await PerfectVolumeControl.getVolume());
+    });
+    PerfectVolumeControl.stream.listen((volume) {               
+         log("Current Volume: $volume");
+         vol.value = _volumeInPercent(volume);
+    });
+  }
+
+  void _updateInertia() {
+    if (speedHistory.length < 2) return;
+
+    int lastIdx = speedHistory.length - 1;
+    int last2ndIdx = lastIdx - 1;
+
+    if (speedHistory[lastIdx] == 0) {
+        curMovementState.value = MovementStates.idle;
+    } else {
+        if (speedHistory[lastIdx] >= speedHistory[last2ndIdx]) {
+            curMovementState.value = MovementStates.acceleration;
+        } else {
+            curMovementState.value = MovementStates.deceleration;
+        }
+    }
   }
 }
 
@@ -173,6 +199,7 @@ class SdSd extends StatelessWidget {
         children: [
           Obx(() => Text("Current Speed: ${c.speed} km/h")),
           Obx(() => Text("Current Volume: ${c.vol}%")),
+          Obx(() => Text("Current State: ${c.curMovementState}")),
         ],
       ),
     );
