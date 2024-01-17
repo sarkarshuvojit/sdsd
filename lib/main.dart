@@ -1,6 +1,7 @@
 import 'dart:developer';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:get/get.dart';
 import 'package:perfect_volume_control/perfect_volume_control.dart';
@@ -61,6 +62,7 @@ class SdSdController extends GetxController {
   var isLocationServiceDisabled = false.obs;
   var isPermissionGranted = false.obs;
   RxList<int> speedHistory = <int>[].obs;
+  late final Ticker _ticker;
 
   final LocationSettings locationSettings = const LocationSettings(
     accuracy: LocationAccuracy.high,
@@ -68,7 +70,7 @@ class SdSdController extends GetxController {
   );
 
   final AndroidSettings androidLocationSettings = AndroidSettings(
-    intervalDuration: const Duration(seconds: 3),
+    intervalDuration: const Duration(seconds: 1),
     distanceFilter: 2,
 
     forceLocationManager: true,
@@ -77,8 +79,15 @@ class SdSdController extends GetxController {
   @override
   void onInit() {
     super.onInit();
-    startPolling();
+    _startPolling();
     _initVolumeManager();
+  }
+
+  @override
+  void dispose() {
+    _ticker.dispose();
+
+    super.dispose();
   }
 
 
@@ -91,32 +100,43 @@ class SdSdController extends GetxController {
   }
 
   void _updateSpeed(int s) {
-    speed.value = s;
+    if (s != speed.value) {
+        log("updating speed to $s");
+        speed.value = s;
+    }
     speedHistory.add(s);
   }
 
+  void processNewPosition(Position? position) {
+      if (position != null) {
+          var speedInMetersPerSec = position.speed;
+          var speedInKmPerHr = _mPerSecondToKmh(speedInMetersPerSec);
 
-  void startPolling() async {
+          _updateSpeed(speedInKmPerHr);
+          _updateInertia();
+      }
+  }
+
+  void _startPolling() async {
     log("StartPolling");
     var isPermissionGranted = await getPermission();
 
     if (!isPermissionGranted) {
       log("Permisssion Denied :(");
+      return;
     }
 
-    Geolocator
-        .getPositionStream(locationSettings: androidLocationSettings)
-        .listen((Position? position) {
-          if (position != null) {
-            log("Found a new position $position going at ${position.speed}");
-            var speedInMetersPerSec = position.speed;
-            var speedInKmPerHr = _mPerSecondToKmh(speedInMetersPerSec);
+    _ticker = Ticker((elapsed) async {
+        var position = await Geolocator.getCurrentPosition(
+            desiredAccuracy: LocationAccuracy.best,
+        );
+        processNewPosition(position);
+    });
+    _ticker.start();
 
-            log("Current speed: $speedInKmPerHr km/h");
-            _updateSpeed(speedInKmPerHr);
-            _updateInertia();
-          }
-        });
+    //Geolocator
+    //    .getPositionStream(locationSettings: androidLocationSettings)
+    //    .listen(processNewPosition);
   }
 
   Future<bool> getPermission() async {
@@ -162,7 +182,6 @@ class SdSdController extends GetxController {
         vol.value = _volumeInPercent(await PerfectVolumeControl.getVolume());
     });
     PerfectVolumeControl.stream.listen((volume) {               
-         log("Current Volume: $volume");
          vol.value = _volumeInPercent(volume);
     });
   }
@@ -172,15 +191,21 @@ class SdSdController extends GetxController {
 
     int lastIdx = speedHistory.length - 1;
     int last2ndIdx = lastIdx - 1;
-
+    
+    MovementStates newState;
     if (speedHistory[lastIdx] == 0) {
-        curMovementState.value = MovementStates.idle;
+        newState = MovementStates.idle;
     } else {
         if (speedHistory[lastIdx] >= speedHistory[last2ndIdx]) {
-            curMovementState.value = MovementStates.acceleration;
+            newState = MovementStates.acceleration;
         } else {
-            curMovementState.value = MovementStates.deceleration;
+            newState = MovementStates.deceleration;
         }
+    }
+
+    if (curMovementState.value != newState) {
+        curMovementState.value = newState;
+        log("updating inertia to $newState");
     }
   }
 }
